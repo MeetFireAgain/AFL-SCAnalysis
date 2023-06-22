@@ -1,3 +1,5 @@
+# .travis.yml  项目的 CI 配置，用于更加方便的管理项目代码和操作，不同的源码管理系统的CI系统也是不一样的，下面是travis.yml格式的CI管理方式
+
 language: c
 
 env:
@@ -14,15 +16,24 @@ before_install:
 # TODO: Move this all into a bash script so we don't need to write bash in yaml.
 script:
   - make
-  - ./afl-gcc ./test-instr.c -o test-instr-gcc
+  - ./afl-gcc ./test-instr.c -o test-instr-gcc # 使用afl-gcc编译目标程序
+  # 准备语料库
   - mkdir seeds
   - echo "" > seeds/nil_seed
+
+  # 执行一次时长为5s的fuzz
   - if [ -z "$AFL_STOP_MANUALLY" ];
     then ./afl-fuzz -i seeds -o out/ -- ./test-instr-gcc;
     else timeout --preserve-status 5s ./afl-fuzz -i seeds -o out/ -- ./test-instr-gcc;
     fi
+
+  # 检查Fuzzer是否正确生成了fuzzer_stats文件（这个文件保存了当前fuzzer的当前状态）
+  # @这里与下面的-p所使用的属性值不一致！！！！代表什么？？？？@
   - .travis/check_fuzzer_stats.sh -o out -k peak_rss_mb -v 1 -p 3
+  # 清理
   - rm -r out/*
+
+  # 用afl-clag 执行一遍fuzz,大致与afl-gcc的流程一致
   - ./afl-clang ./test-instr.c -o test-instr-clang
   - if [ -z "$AFL_STOP_MANUALLY" ];
     then ./afl-fuzz -i seeds -o out/ -- ./test-instr-clang;
@@ -30,6 +41,8 @@ script:
     fi
   - .travis/check_fuzzer_stats.sh -o out -k peak_rss_mb -v 1 -p 2
   - make clean
+
+  # 使用llvm_mode 执行一遍fuzz
   - CC=clang CXX=clang++ make
   - cd llvm_mode
   # TODO: Build with different versions of clang/LLVM since LLVM passes don't
@@ -43,12 +56,16 @@ script:
     else timeout --preserve-status 5s ./afl-fuzz -i seeds -o out/ -- ./test-instr-clang-fast;
     fi
   - .travis/check_fuzzer_stats.sh -o out -k peak_rss_mb -v 1 -p 3
+  
   # Test fuzzing libFuzzer targets and trace-pc-guard instrumentation.
+  # 测试对libfuzzer的兼容性
   - clang -g -fsanitize-coverage=trace-pc-guard ./test-libfuzzer-target.c -c
   - clang -c -w llvm_mode/afl-llvm-rt.o.c
   - wget https://raw.githubusercontent.com/llvm/llvm-project/main/compiler-rt/lib/fuzzer/afl/afl_driver.cpp
   - clang++ afl_driver.cpp afl-llvm-rt.o.o test-libfuzzer-target.o -o test-libfuzzer-target
   - timeout --preserve-status 5s ./afl-fuzz -i seeds -o out/ -- ./test-libfuzzer-target
+  
+  # 测试 qemu mode
   - cd qemu_mode
   - ./build_qemu_support.sh
   - cd ..
